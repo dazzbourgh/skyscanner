@@ -2,11 +2,6 @@ spring:
   jackson:
     deserialization:
       FAIL_ON_UNKNOWN_PROPERTIES: false
-  datasource:
-    username: postgres
-    password: $ky$canner1A
-    continue-on-error: true
-    initialization-mode: always
   cloud:
     gcp:
       project-id: skyscanner-287223

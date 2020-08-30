@@ -1,16 +1,17 @@
 package zhi.yest.skyscanner.service
 
-import kotlinx.coroutines.reactive.awaitSingle
+import kotlinx.coroutines.reactive.awaitFirstOrNull
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import org.springframework.web.reactive.function.client.WebClient
+import reactor.core.publisher.Mono
 import zhi.yest.skyscanner.data.*
 
 @Service
 class SkyScannerService(private val webClient: WebClient,
                         @Value("\${sm://X-RapidAPI-Key}") private val apiKey: String) {
 
-    suspend fun requestRoute(routeRequest: RouteRequest) = webClient.get()
+    suspend fun requestRoute(routeRequest: RouteRequest): RouteResponse? = webClient.get()
             .uri {
                 val uri = it.host("skyscanner-skyscanner-flight-search-v1.p.rapidapi.com")
                         .scheme("https")
@@ -21,7 +22,7 @@ class SkyScannerService(private val webClient: WebClient,
             }
             .request(RouteResponse::class.java)
 
-    suspend fun requestQuote(quoteRequest: QuoteRequest) = webClient.get()
+    suspend fun requestQuote(quoteRequest: QuoteRequest): QuoteResponse? = webClient.get()
             .uri {
                 val uri = it.host("skyscanner-skyscanner-flight-search-v1.p.rapidapi.com")
                         .scheme("https")
@@ -32,7 +33,7 @@ class SkyScannerService(private val webClient: WebClient,
             }
             .request(QuoteResponse::class.java)
 
-    suspend fun requestPlace(placeRequest: PlaceRequest) = webClient.get()
+    suspend fun requestPlace(placeRequest: PlaceRequest): PlaceResponse? = webClient.get()
             .uri {
                 it.host("skyscanner-skyscanner-flight-search-v1.p.rapidapi.com")
                         .scheme("https")
@@ -48,5 +49,6 @@ class SkyScannerService(private val webClient: WebClient,
                     .header("useQueryString", "true")
                     .retrieve()
                     .bodyToMono(clazz)
-                    .awaitSingle()
+                    .onErrorResume { Mono.empty() }
+                    .awaitFirstOrNull()
 }

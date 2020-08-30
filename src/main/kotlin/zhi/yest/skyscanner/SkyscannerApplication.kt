@@ -3,6 +3,7 @@ package zhi.yest.skyscanner
 import com.google.cloud.pubsub.v1.Publisher
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.CommandLineRunner
 import org.springframework.boot.autoconfigure.SpringBootApplication
@@ -14,9 +15,10 @@ import zhi.yest.skyscanner.data.RouteRequest
 import zhi.yest.skyscanner.data.mapper.toQuotes
 import zhi.yest.skyscanner.properties.BigQueryProperties
 import zhi.yest.skyscanner.properties.PubSubProperties
-import zhi.yest.skyscanner.service.*
+import zhi.yest.skyscanner.service.BigQueryService
+import zhi.yest.skyscanner.service.SkyScannerService
+import zhi.yest.skyscanner.service.completionNotification
 import java.time.LocalDate
-
 
 @SpringBootApplication
 @PropertySource("classpath:cities.yml")
@@ -26,13 +28,14 @@ class SkyscannerApplication(@Value("\${cities}") private val cities: List<String
                             private val bigQueryService: BigQueryService,
                             private val skyScannerService: SkyScannerService,
                             private val pubSubProperties: PubSubProperties) : CommandLineRunner {
+    private val log = LoggerFactory.getLogger(javaClass)
 
     @FlowPreview
     override fun run(vararg args: String?) = runBlocking<Unit> {
         cities.asFlow()
                 .map { PlaceRequest(it, "US", "USD", "en-US") }
                 .map { skyScannerService.requestPlace(it) }
-                .flatMapMerge { it.places.asFlow() }
+                .flatMapMerge { it?.places?.asFlow() ?: flowOf() }
                 .flatMapMerge {
                     generateSequence(LocalDate.now().plusDays(14)) { it.plusDays(1) }
                             .flatMap { date ->
@@ -47,10 +50,13 @@ class SkyscannerApplication(@Value("\${cities}") private val cities: List<String
                     async { skyScannerService.requestRoute(it) }.also { req -> req.start() }
                 }
                 .map { it.await() }
-                .filter { it.quotes.isNotEmpty() }
-                .map { it.toQuotes() }
+                .filter { it?.quotes?.isNotEmpty() ?: false }
+                .map { it!!.toQuotes() }
                 .flowOn(Dispatchers.Default)
-                .onEach { bigQueryService.save(it) }
+                .onEach {
+                    log.info("Saving ${it.size} quotes")
+                    bigQueryService.save(it)
+                }
                 .flowOn(Dispatchers.IO)
                 .catch { it.printStackTrace() }
                 .collect()
