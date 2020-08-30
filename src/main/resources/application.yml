@@ -17,4 +17,8 @@ bigquery:
   table-id: quotes
   dataset-id: skyscanner
 
+pubsub:
+  topic: projects/skyscanner-287223/topics/job-completion
+  message: complete
+
 delay: 1500
