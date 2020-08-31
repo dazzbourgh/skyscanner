@@ -16,4 +16,5 @@ pubsub:
   topic: projects/skyscanner-287223/topics/job-completion
   message: complete
 
-delay: 1500
+delay: 1300
+days: 120

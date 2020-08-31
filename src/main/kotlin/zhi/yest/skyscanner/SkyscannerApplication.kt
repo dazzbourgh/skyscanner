@@ -10,8 +10,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.boot.runApplication
 import org.springframework.context.annotation.PropertySource
-import zhi.yest.skyscanner.data.PlaceRequest
-import zhi.yest.skyscanner.data.RouteRequest
+import zhi.yest.skyscanner.data.*
 import zhi.yest.skyscanner.data.mapper.toQuotes
 import zhi.yest.skyscanner.properties.BigQueryProperties
 import zhi.yest.skyscanner.properties.PubSubProperties
@@ -25,6 +24,7 @@ import java.time.LocalDate
 @EnableConfigurationProperties(BigQueryProperties::class, PubSubProperties::class)
 class SkyscannerApplication(@Value("\${cities}") private val cities: List<String>,
                             @Value("\${delay:1500}") private val delay: Long,
+                            @Value("\${days:60}") private val days: Int,
                             private val bigQueryService: BigQueryService,
                             private val skyScannerService: SkyScannerService,
                             private val pubSubProperties: PubSubProperties) : CommandLineRunner {
@@ -34,24 +34,23 @@ class SkyscannerApplication(@Value("\${cities}") private val cities: List<String
     override fun run(vararg args: String?) = runBlocking<Unit> {
         cities.asFlow()
                 .map { PlaceRequest(it, "US", "USD", "en-US") }
-                .map { skyScannerService.requestPlace(it) }
-                .flatMapMerge { it?.places?.asFlow() ?: flowOf() }
-                .flatMapMerge {
+                .transform(toPlaces(skyScannerService))
+                .flatMapMerge { it.places.asFlow() }
+                .flatMapMerge { placeDto ->
                     generateSequence(LocalDate.now().plusDays(14)) { it.plusDays(1) }
                             .flatMap { date ->
                                 sequenceOf(
-                                        RouteRequest("US", "USD", "en-US", "LAX-sky", it.placeId, date),
-                                        RouteRequest("RU", "USD", "en-US", "LED-sky", it.placeId, date))
+                                        RouteRequest("US", "USD", "en-US", "LAX-sky", placeDto.placeId, date),
+                                        RouteRequest("RU", "USD", "en-US", "LED-sky", placeDto.placeId, date))
                             }
+                            .take(days)
                             .asFlow()
                 }
                 .map {
                     delay(delay)
                     async { skyScannerService.requestRoute(it) }.also { req -> req.start() }
                 }
-                .map { it.await() }
-                .filter { it?.quotes?.isNotEmpty() ?: false }
-                .map { it!!.toQuotes() }
+                .transform(toQuotes)
                 .flowOn(Dispatchers.Default)
                 .onEach {
                     log.info("Saving ${it.size} quotes")
@@ -66,6 +65,17 @@ class SkyscannerApplication(@Value("\${cities}") private val cities: List<String
             notifyCompletion()
         }
     }
+}
+
+val toPlaces: (SkyScannerService) -> suspend FlowCollector<PlaceResponse>.(PlaceRequest) -> Unit =
+        { skyScannerService ->
+            { placeRequest ->
+                skyScannerService.requestPlace(placeRequest).takeIf { it != null }.also { emit(it as PlaceResponse) }
+            }
+        }
+
+val toQuotes: suspend FlowCollector<List<Quote>>.(Deferred<RouteResponse?>) -> Unit = {
+    it.await()?.toQuotes().also { list -> if (list?.isNotEmpty() == true) emit(list) }
 }
 
 fun main(args: Array<String>) {
